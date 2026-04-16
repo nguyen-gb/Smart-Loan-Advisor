@@ -57,6 +57,9 @@ class LoanPredictor:
         housing_status: str = "own",
         collateral_assets: Optional[str] = None,
         repayment_method: str = "installment",
+        is_returning_customer: int = 0,
+        active_loan_count: int = 0,
+        historical_on_time_rate: float = 1.0,
         top_k: int = 3,
     ) -> List[Dict]:
         if not self._loaded:
@@ -76,6 +79,9 @@ class LoanPredictor:
             "purpose": purpose,
             "loan_term_months": loan_term_months,
             "repayment_method": repayment_method,
+            "is_returning_customer": is_returning_customer,
+            "active_loan_count": active_loan_count,
+            "historical_on_time_rate": historical_on_time_rate,
         }])
 
         X_pkg = self.pkg_preprocessor.transform(input_data.copy())

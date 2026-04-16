@@ -9,6 +9,7 @@ class LoanApplication(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    cccd = Column(String(20), index=True, nullable=True)  # Snapshot at time of application
     package_id = Column(Integer, ForeignKey("loan_packages.id"), nullable=False)
     loan_amount = Column(Float, nullable=False)  # triệu VND
     loan_term_months = Column(Integer, nullable=False)

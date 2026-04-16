@@ -14,7 +14,8 @@ from ..config import (
 REQUIRED_COLUMNS = [
     "age", "gender", "marital_status", "monthly_income",
     "living_expenses", "current_debt", "asset_value", "dependents", "housing_status",
-    "loan_amount", "purpose", "loan_term_months", "repayment_method", "package_id", "is_on_time_payment"
+    "loan_amount", "purpose", "loan_term_months", "repayment_method", "package_id", "is_on_time_payment",
+    "is_returning_customer", "active_loan_count", "historical_on_time_rate"
 ]
 
 VALID_GENDERS = ["male", "female"]
@@ -95,7 +96,8 @@ def _run_training_pipeline(df: pd.DataFrame) -> dict:
     features = [
         "age", "gender", "marital_status", "monthly_income",
         "living_expenses", "current_debt", "asset_value", "dependents", "housing_status",
-        "loan_amount", "purpose", "loan_term_months", "repayment_method"
+        "loan_amount", "purpose", "loan_term_months", "repayment_method",
+        "is_returning_customer", "active_loan_count", "historical_on_time_rate"
     ]
     target_pkg = "package_id"
 
@@ -129,7 +131,8 @@ def _run_training_pipeline(df: pd.DataFrame) -> dict:
     features = [
         "age", "gender", "marital_status", "monthly_income",
         "living_expenses", "current_debt", "asset_value", "dependents", "housing_status",
-        "loan_amount", "purpose", "loan_term_months", "repayment_method"
+        "loan_amount", "purpose", "loan_term_months", "repayment_method",
+        "is_returning_customer", "active_loan_count", "historical_on_time_rate"
     ]
     target_risk = "is_on_time_payment"
 

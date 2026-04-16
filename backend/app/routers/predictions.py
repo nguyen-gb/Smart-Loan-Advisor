@@ -9,6 +9,7 @@ from ..schemas.prediction import (
     PredictionInput, PredictionResponse, PackageRecommendation,
     LoanApplicationCreate
 )
+from ..models.loan_application import LoanApplication
 
 logger = get_logger("app.routers.predictions")
 from ..ml.predictor import get_predictor, reload_predictor
@@ -17,10 +18,12 @@ from ..dependencies import check_role
 
 router = APIRouter(prefix="/predictions", tags=["ML Predictions"])
 
-
 @router.post("/recommend", response_model=PredictionResponse, dependencies=[Depends(check_role(["staff", "manager"]))])
-def recommend_packages(input_data: PredictionInput):
+def recommend_packages(input_data: PredictionInput, db: Session = Depends(get_db)):
     try:
+        # Lấy lịch sử khách hàng để làm giàu dữ liệu đầu vào cho ML
+        history = LoanService.get_customer_loan_history(db, input_data.cccd)
+        
         predictor = get_predictor()
         recommendations = predictor.predict(
             age=input_data.age,
@@ -37,6 +40,9 @@ def recommend_packages(input_data: PredictionInput):
             housing_status=input_data.housing_status,
             collateral_assets=input_data.collateral_assets,
             repayment_method=input_data.repayment_method,
+            is_returning_customer=history["is_returning"],
+            active_loan_count=history["active_loan_count"],
+            historical_on_time_rate=history["historical_on_time_rate"],
             top_k=3,
         )
 
@@ -44,6 +50,7 @@ def recommend_packages(input_data: PredictionInput):
 
         return PredictionResponse(
             customer_info={
+                "cccd": input_data.cccd,
                 "age": input_data.age,
                 "gender": input_data.gender,
                 "marital_status": input_data.marital_status,
@@ -82,6 +89,7 @@ def create_loan_application(
     try:
         customer = LoanService.create_customer(
             db,
+            cccd=app_data.cccd,
             name=app_data.customer_name,
             age=app_data.age,
             gender=app_data.gender,
@@ -102,6 +110,7 @@ def create_loan_application(
         application = LoanService.create_application(
             db,
             customer_id=customer.id,
+            cccd=app_data.cccd,
             package_id=app_data.package_id,
             loan_amount=app_data.loan_amount,
             loan_term_months=app_data.loan_term_months,
@@ -144,10 +153,13 @@ def list_applications(
     db: Session = Depends(get_db)
 ):
     apps = LoanService.get_applications(db, skip, limit, status, purpose)
-    results = []
+    total = LoanService.get_applications_count(db, status, purpose)
+    
+    items = []
     for app in apps:
-        results.append({
+        items.append({
             "id": app.id,
+            "cccd": app.cccd,
             "customer_name": app.customer.name if app.customer else "N/A",
             "package_name": app.package.name if app.package else "N/A",
             "loan_amount": app.loan_amount,
@@ -157,19 +169,52 @@ def list_applications(
             "status": app.status,
             "risk_score": app.risk_score,
             "repayment_method": app.repayment_method,
+            "is_on_time_payment": app.is_on_time_payment,
             "recommended_by_ml": app.recommended_by_ml,
             "created_at": app.created_at.isoformat() if app.created_at else None,
         })
-    return results
+    
+    return {
+        "total": total,
+        "items": items,
+        "page": (skip // limit) + 1,
+        "limit": limit
+    }
 
 
 @router.put("/applications/{app_id}/status", dependencies=[Depends(check_role(["manager"]))])
 def update_application_status(
     app_id: int, status: str, db: Session = Depends(get_db)
 ):
-    if status not in ["approved", "rejected", "pending"]:
-        raise HTTPException(status_code=400, detail="Invalid status")
-    app = LoanService.update_application_status(db, app_id, status)
+    app = db.query(LoanApplication).filter(LoanApplication.id == app_id).first()
     if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-    return {"message": f"Application {app_id} updated to {status}"}
+        raise HTTPException(status_code=404, detail="Hồ sơ không tồn tại")
+    
+    if app.is_on_time_payment is not None:
+        raise HTTPException(status_code=400, detail="Hồ sơ đã hoàn tất thanh toán, không thể thay đổi trạng thái duyệt")
+
+    app.status = status
+    db.commit()
+    return {"message": f"Hồ sơ {app_id} đã chuyển sang trạng thái: {status}"}
+
+
+@router.put("/applications/{app_id}/payment", dependencies=[Depends(check_role(["manager"]))])
+def update_payment_status(
+    app_id: int, is_on_time: bool, db: Session = Depends(get_db)
+):
+    app = db.query(LoanApplication).filter(LoanApplication.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Hồ sơ không tồn tại")
+    
+    if app.status == "rejected":
+        raise HTTPException(status_code=400, detail="Hồ sơ đã bị từ chối, không thể cập nhật thanh toán")
+    
+    if app.status == "pending":
+        raise HTTPException(status_code=400, detail="Hồ sơ chưa được duyệt, không thể cập nhật thanh toán")
+
+    if app.is_on_time_payment is not None:
+        raise HTTPException(status_code=400, detail="Hồ sơ đã được cập nhật trạng thái thanh toán trước đó và không thể thay đổi")
+
+    app.is_on_time_payment = is_on_time
+    db.commit()
+    return {"message": f"Cập nhật trạng thái thanh toán hồ sơ {app_id} thành công"}

@@ -7,6 +7,7 @@ class Customer(Base):
     __tablename__ = "customers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    cccd = Column(String(20), unique=True, index=True, nullable=False)
     name = Column(String(100), nullable=False)
     age = Column(Integer, nullable=False)
     gender = Column(String(10), nullable=False)  # male, female

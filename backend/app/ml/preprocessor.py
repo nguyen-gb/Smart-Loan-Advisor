@@ -13,7 +13,8 @@ class DataPreprocessor:
         self.categorical_columns = ["gender", "marital_status", "purpose", "housing_status", "repayment_method"]
         self.numerical_columns = [
             "age", "monthly_income", "loan_amount", "loan_term_months",
-            "living_expenses", "current_debt", "asset_value", "dependents"
+            "living_expenses", "current_debt", "asset_value", "dependents",
+            "is_returning_customer", "active_loan_count", "historical_on_time_rate"
         ]
 
     def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -76,6 +77,11 @@ class DataPreprocessor:
             bins=[0, 10, 20, 40, 80, 1000],
             labels=[0, 1, 2, 3, 4]
         ).astype(int)
+
+        # New historical features (cleaned/capped)
+        df["active_loan_count"] = df["active_loan_count"].fillna(0).clip(0, 5)
+        df["historical_on_time_rate"] = df["historical_on_time_rate"].fillna(1.0).clip(0, 1)
+        df["is_returning_customer"] = df["is_returning_customer"].fillna(0).astype(int)
 
         return df
 

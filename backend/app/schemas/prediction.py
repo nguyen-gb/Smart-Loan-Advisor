@@ -4,6 +4,7 @@ from datetime import datetime
 
 
 class PredictionInput(BaseModel):
+    cccd: str = Field(..., min_length=9, max_length=20, description="Số CCCD/CMND")
     age: int = Field(..., ge=18, le=70, description="Tuổi khách hàng")
     gender: str = Field(..., pattern="^(male|female)$", description="Giới tính")
     marital_status: str = Field(
@@ -60,6 +61,7 @@ class PredictionResponse(BaseModel):
 
 
 class LoanApplicationCreate(BaseModel):
+    cccd: str
     customer_name: str
     age: int
     gender: str

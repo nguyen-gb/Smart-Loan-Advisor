@@ -9,3 +9,4 @@ joblib==1.4.2
 faker==30.0.0
 python-multipart==0.0.12
 aiosqlite==0.20.0
+apscheduler==3.10.4

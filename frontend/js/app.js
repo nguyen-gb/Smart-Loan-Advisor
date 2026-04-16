@@ -1,5 +1,6 @@
-
 const API_BASE = 'http://localhost:3000/api/v1';
+let currentPage = 1;
+const pageSize = 50;
 
 function getAuthToken() {
     return localStorage.getItem('sla_token');
@@ -53,20 +54,20 @@ async function authFetch(url, options = {}) {
 function updateUIForRole() {
     const role = getUserRole();
     const name = getUserName();
-    
+
     const sidebar = document.querySelector('.sidebar');
     const footer = document.querySelector('.sidebar-footer');
-      
+
     let profile = document.querySelector('.user-profile');
     if (!profile) {
         profile = document.createElement('div');
         profile.className = 'user-profile';
         sidebar.insertBefore(profile, sidebar.querySelector('.sidebar-nav'));
     }
-    
+
     const initials = name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'U';
     const roleLabel = role === 'manager' ? 'Quản lý' : 'Nhân viên';
-    
+
     profile.innerHTML = `
         <div class="user-avatar">${initials}</div>
         <div class="user-info">
@@ -89,12 +90,12 @@ function updateUIForRole() {
     if (role === 'staff') {
         const staffOnlyPages = ['predict'];
         const managerOnlyItems = ['nav-dashboard', 'nav-packages', 'nav-applications', 'nav-ml-management'];
-        
+
         managerOnlyItems.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
         });
-        
+
         document.querySelectorAll('.nav-section').forEach(section => {
             const title = section.querySelector('.nav-section-title').textContent;
             if (title === 'Quản lý' || title === 'Hệ thống') {
@@ -107,7 +108,7 @@ function updateUIForRole() {
 
 function showPage(pageId) {
     if (!checkAuth()) return;
-    
+
     const role = getUserRole();
     if (role === 'staff' && pageId !== 'predict') {
         showToast('Bạn không có quyền truy cập trang này', 'error');
@@ -196,6 +197,7 @@ async function handlePredict(event) {
     btn.innerHTML = '<span class="spinner"></span> Đang phân tích...';
 
     const data = {
+        cccd: document.getElementById('cccd').value,
         age: parseInt(document.getElementById('age').value),
         gender: document.getElementById('gender').value,
         marital_status: document.getElementById('maritalStatus').value,
@@ -244,7 +246,7 @@ function displayPredictionResults(result) {
     result.recommendations.forEach((rec, index) => {
         const rankClass = index === 0 ? 'rank-1' : '';
         const riskColorClass = rec.risk_level === 'low' ? 'text-success' :
-                               rec.risk_level === 'medium' ? 'text-warning' : 'text-danger';
+            rec.risk_level === 'medium' ? 'text-warning' : 'text-danger';
 
         html += `
             <div class="recommendation-card ${rankClass} slide-up" style="animation-delay: ${index * 0.1}s">
@@ -328,7 +330,7 @@ function displayPredictionResults(result) {
     container.innerHTML = html;
 
     container.querySelectorAll('.apply-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function () {
             const pkgId = parseInt(this.dataset.packageId);
             const pkgName = this.dataset.packageName;
             const riskScore = parseFloat(this.dataset.riskScore);
@@ -381,6 +383,7 @@ async function applyPackage(packageId, packageName, riskScore) {
 
     try {
         const payload = {
+            cccd: document.getElementById('cccd').value,
             customer_name: customerName,
             age: age,
             gender: gender,
@@ -548,29 +551,34 @@ async function loadPackages() {
 
 async function loadApplications() {
     try {
+        const tableBody = document.getElementById('applicationsTable');
         const status = document.getElementById('filterStatus').value;
-        let url = `${API_BASE}/predictions/applications?limit=50`;
+        const skip = (currentPage - 1) * pageSize;
+        
+        let url = `${API_BASE}/predictions/applications?skip=${skip}&limit=${pageSize}`;
         if (status) url += `&status=${status}`;
 
         const response = await authFetch(url);
-        const apps = await response.json();
+        const data = await response.json();
+        
+        const apps = data.items || [];
+        const total = data.total || 0;
+        const totalPages = Math.ceil(total / pageSize);
+
+        // Update UI state
+        document.getElementById('totalAppsCount').textContent = total;
+        document.getElementById('prevPageBtn').disabled = currentPage === 1;
+        document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+        
+        renderPagination(totalPages, currentPage);
 
         if (!Array.isArray(apps)) {
-            console.error('Expected array but got:', apps);
-            document.getElementById('applicationsTable').innerHTML = `
-                <tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--danger);">
-                    Lỗi tải dữ liệu: ${apps.detail || 'Phản hồi không hợp lệ từ máy chủ'}
-                </td></tr>
-            `;
+            tableBody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 40px; color: var(--danger);">Lỗi tải dữ liệu</td></tr>`;
             return;
         }
 
         if (apps.length === 0) {
-            document.getElementById('applicationsTable').innerHTML = `
-                <tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--text-muted);">
-                    Chưa có hồ sơ vay nào
-                </td></tr>
-            `;
+            tableBody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 40px; color: var(--text-muted);">Chưa có hồ sơ vay nào</td></tr>`;
             return;
         }
 
@@ -582,29 +590,47 @@ async function loadApplications() {
                    </span>`
                 : 'N/A';
 
+            const paymentBadge = app.is_on_time_payment === true
+                ? '<span class="status-badge approved">✅ Tốt</span>'
+                : app.is_on_time_payment === false
+                    ? '<span class="status-badge rejected">🔴 Trễ/Nợ</span>'
+                    : '<span class="status-badge pending">⏳ Chưa có</span>';
+
             html += `
                 <tr>
                     <td><strong>#${app.id}</strong></td>
-                    <td>${app.customer_name}</td>
+                    <td>
+                        <div style="font-weight: 600;">${app.customer_name}</div>
+                        <div style="font-size: 10px; color: var(--text-muted);">${app.cccd || 'N/A'}</div>
+                    </td>
                     <td>${app.package_name}</td>
                     <td>${formatMoney(app.loan_amount)} tr</td>
                     <td>${app.loan_term_months}T</td>
-                    <td>${app.interest_rate}%/năm</td>
+                    <td>${app.interest_rate}%</td>
                     <td>
-                        <span class="badge" style="background: var(--primary-50); color: var(--primary-700); font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--primary-200);">
-                            ${app.repayment_method === 'interest_only' ? 'Trả lãi, Gốc cuối' : 'Trả góp (Gốc+Lãi)'}
+                        <span class="badge-compact">
+                            ${app.repayment_method === 'interest_only' ? 'Trả lãi' : 'Trả góp'}
                         </span>
                     </td>
                     <td>${riskBadge}</td>
-                    <td><span class="status-badge ${app.status}">${
-                        app.status === 'pending' ? '⏳ Chờ duyệt' :
-                        app.status === 'approved' ? '✅ Đã duyệt' : '❌ Từ chối'
-                    }</span></td>
+                    <td><span class="status-badge ${app.status}">${app.status === 'pending' ? '⏳ Chờ' :
+                app.status === 'approved' ? '✅ Duyệt' : '❌ Từ chối'
+            }</span></td>
+                    <td>${paymentBadge}</td>
                     <td>
-                        ${app.status === 'pending' ? `
-                            <button class="btn btn-success btn-sm" onclick="updateAppStatus(${app.id}, 'approved')" style="margin-right: 4px;">✅</button>
-                            <button class="btn btn-danger btn-sm" onclick="updateAppStatus(${app.id}, 'rejected')">❌</button>
-                        ` : '—'}
+                        <div style="display: flex; gap: 4px;">
+                            ${app.is_on_time_payment !== null ? `
+                                <span style="font-size: 11px; color: var(--text-muted); font-style: italic;">Hồ sơ đã kết thúc</span>
+                            ` : app.status === 'pending' ? `
+                                <button class="btn btn-success btn-sm" onclick="updateAppStatus(${app.id}, 'approved')" title="Duyệt">✅</button>
+                                <button class="btn btn-danger btn-sm" onclick="updateAppStatus(${app.id}, 'rejected')" title="Từ chối">❌</button>
+                            ` : app.status === 'approved' ? `
+                                <button class="btn btn-outline btn-sm" onclick="updatePaymentStatus(${app.id}, true)" title="Trả đúng hạn">💰</button>
+                                <button class="btn btn-outline btn-sm" onclick="updatePaymentStatus(${app.id}, false)" title="Báo nợ xấu">⚠️</button>
+                            ` : `
+                                <span style="font-size: 11px; color: var(--danger-500);">Đã từ chối</span>
+                            `}
+                        </div>
                     </td>
                 </tr>
             `;
@@ -767,7 +793,7 @@ async function trainFromFile() {
 
         let warningHtml = '';
         if (result.warnings && result.warnings.length > 0) {
-            warningHtml = '<br><br><strong>⚠️ Cảnh báo:</strong><br>' + 
+            warningHtml = '<br><br><strong>⚠️ Cảnh báo:</strong><br>' +
                 result.warnings.map(w => `• ${w}`).join('<br>');
         }
 
@@ -801,14 +827,111 @@ async function trainFromFile() {
     }
 }
 
+async function updatePaymentStatus(appId, isOnTime) {
+    const label = isOnTime ? 'Trả đúng hạn' : 'Báo nợ xấu';
+    if (!confirm(`Xác nhận đánh dấu hồ sơ #${appId} là "${label}"?`)) return;
+
+    try {
+        const response = await authFetch(`${API_BASE}/predictions/applications/${appId}/payment?is_on_time=${isOnTime}`, {
+            method: 'PUT',
+        });
+        if (!response.ok) throw new Error('Lỗi cập nhật');
+
+        showToast(`Cập nhật trạng thái thanh toán hồ sơ #${appId} thành công`, 'success');
+        loadApplications();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function syncAndTrainDB() {
+    const btn = document.getElementById('syncBtn');
+    const resultDiv = document.getElementById('syncResult');
+    const statusLabel = document.getElementById('syncStatus');
+
+    if (!confirm('Hệ thống sẽ trích xuất dữ liệu từ Database và thực hiện huấn luyện lại Model. Bạn có muốn tiếp tục?')) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Đang đồng bộ & huấn luyện...';
+    statusLabel.innerHTML = 'Trạng thái: Đang xử lý...';
+    statusLabel.className = 'risk-badge medium';
+    resultDiv.innerHTML = '';
+
+    try {
+        const response = await authFetch(`${API_BASE}/ml/sync`, { method: 'POST' });
+        const result = await response.json();
+
+        if (!response.ok || result.status === 'error') {
+            throw new Error(result.message || 'Lỗi đồng bộ');
+        }
+
+        resultDiv.innerHTML = `
+            <div class="assessment-box good">
+                <div class="assessment-title">✅ Đồng bộ & Huấn luyện thành công</div>
+                <div class="assessment-text">
+                    <strong>Số mẫu sử dụng:</strong> ${result.n_samples} hồ sơ<br>
+                    <strong>Package Accuracy:</strong> ${(result.package_accuracy * 100).toFixed(1)}%<br>
+                    <strong>Risk Accuracy:</strong> ${(result.risk_accuracy * 100).toFixed(1)}%<br>
+                    <strong>Thời gian xử lý:</strong> ${result.duration_sec}s
+                </div>
+            </div>
+        `;
+        showToast('Đồng bộ & Huấn luyện hoàn tất!', 'success');
+        statusLabel.innerHTML = 'Trạng thái: Hoàn thành';
+        statusLabel.className = 'risk-badge low';
+        loadMLStatus();
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div class="assessment-box bad">
+                <div class="assessment-title">❌ Lỗi đồng bộ</div>
+                <div class="assessment-text">${error.message}</div>
+            </div>
+        `;
+        showToast(error.message, 'error');
+        statusLabel.innerHTML = 'Trạng thái: Lỗi';
+        statusLabel.className = 'risk-badge high';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔄 Đồng bộ & Huấn luyện ngay';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     if (checkAuth()) {
         updateUIForRole();
-        
+
         const startPage = localStorage.getItem('sla_start_page') || 'predict';
-        localStorage.removeItem('sla_start_page'); 
-        
+        localStorage.removeItem('sla_start_page');
+
         showPage(startPage);
         checkMLStatus();
     }
 });
+
+function changePage(delta) {
+    currentPage += delta;
+    loadApplications();
+}
+
+function goToPage(page) {
+    currentPage = page;
+    loadApplications();
+}
+
+function renderPagination(totalPages, current) {
+    const container = document.getElementById('pageNumbers');
+    if (!container) return;
+    
+    let html = '';
+    const range = 2; // Number of pages to show around current page
+    
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= current - range && i <= current + range)) {
+            html += `<button class="btn btn-sm ${i === current ? 'btn-primary' : 'btn-outline'}" onclick="goToPage(${i})" style="min-width: 32px; padding: 6px;">${i}</button>`;
+        } else if (i === current - range - 1 || i === current + range + 1) {
+            html += `<span style="color: var(--text-muted); padding: 0 4px;">...</span>`;
+        }
+    }
+    
+    container.innerHTML = html;
+}

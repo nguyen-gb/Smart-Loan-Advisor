@@ -8,9 +8,11 @@ import traceback
 from .config import API_PREFIX, PROJECT_NAME, PROJECT_VERSION
 from .logging_config import setup_logging, get_logger
 from .database import init_db, SessionLocal
-from .routers import customers, loan_packages, predictions, dashboard, auth
+from .routers import customers, loan_packages, predictions, dashboard, auth, ml
 from .ml.data_generator import LOAN_PACKAGES
 from .models.loan_package import LoanPackage
+
+from .services.scheduler_service import SchedulerService
 
 setup_logging()
 logger = get_logger("app.main")
@@ -118,6 +120,7 @@ app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(customers.router, prefix=API_PREFIX)
 app.include_router(loan_packages.router, prefix=API_PREFIX)
 app.include_router(predictions.router, prefix=API_PREFIX)
+app.include_router(ml.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)
 
 
@@ -126,8 +129,15 @@ async def startup_event():
     init_db()
     seed_users()
     seed_loan_packages()
+    SchedulerService.start()
     print(f"[STARTED] {PROJECT_NAME} v{PROJECT_VERSION} started!")
     print(f"[DOCS] API Docs: http://localhost:3000{API_PREFIX}/docs")
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    SchedulerService.stop()
+    print("[STOPPED] Application shutting down...")
 
 
 @app.get("/")

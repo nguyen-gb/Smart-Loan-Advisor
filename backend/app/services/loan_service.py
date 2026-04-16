@@ -11,6 +11,17 @@ class LoanService:
 
     @staticmethod
     def create_customer(db: Session, **kwargs) -> Customer:
+        cccd = kwargs.get("cccd")
+        if cccd:
+            existing = db.query(Customer).filter(Customer.cccd == cccd).first()
+            if existing:
+                # Cập nhật thông tin mới nhất
+                for key, value in kwargs.items():
+                    setattr(existing, key, value)
+                db.commit()
+                db.refresh(existing)
+                return existing
+        
         customer = Customer(**kwargs)
         db.add(customer)
         db.commit()
@@ -57,6 +68,17 @@ class LoanService:
         return query.order_by(LoanApplication.id.desc()).offset(skip).limit(limit).all()
 
     @staticmethod
+    def get_applications_count(
+        db: Session, status: Optional[str] = None, purpose: Optional[str] = None
+    ) -> int:
+        query = db.query(func.count(LoanApplication.id))
+        if status:
+            query = query.filter(LoanApplication.status == status)
+        if purpose:
+            query = query.filter(LoanApplication.purpose == purpose)
+        return query.scalar() or 0
+
+    @staticmethod
     def update_application_status(
         db: Session, app_id: int, status: str
     ) -> Optional[LoanApplication]:
@@ -66,6 +88,69 @@ class LoanService:
             db.commit()
             db.refresh(app)
         return app
+
+    @staticmethod
+    def update_payment_status(
+        db: Session, app_id: int, is_on_time: bool
+    ) -> Optional[LoanApplication]:
+        app = db.query(LoanApplication).filter(LoanApplication.id == app_id).first()
+        if app:
+            app.is_on_time_payment = is_on_time
+            db.commit()
+            db.refresh(app)
+        return app
+
+    @staticmethod
+    def get_customer_loan_history(db: Session, cccd: str) -> dict:
+        apps = db.query(LoanApplication).filter(LoanApplication.cccd == cccd).all()
+        active_loans = [a for a in apps if a.status == "approved" and a.is_on_time_payment is None]
+        completed_loans = [a for a in apps if a.is_on_time_payment is not None]
+        
+        on_time_count = sum(1 for a in completed_loans if a.is_on_time_payment)
+        on_time_rate = on_time_count / len(completed_loans) if completed_loans else 1.0
+        
+        return {
+            "is_returning": len(apps) > 0,
+            "active_loan_count": len(active_loans),
+            "historical_on_time_rate": on_time_rate,
+            "total_previous_loans": len(apps)
+        }
+
+    @staticmethod
+    def get_training_data_from_db(db: Session) -> List[dict]:
+        apps = db.query(LoanApplication).all()
+        data = []
+        for app in apps:
+            # Lấy lịch sử tại thời điểm đó (đơn giản hóa bằng cách lấy history của CCCD trừ đi chính app này)
+            history = db.query(LoanApplication).filter(
+                LoanApplication.cccd == app.cccd,
+                LoanApplication.id < app.id
+            ).all()
+            
+            prev_completed = [a for a in history if a.is_on_time_payment is not None]
+            prev_on_time = sum(1 for a in prev_completed if a.is_on_time_payment)
+            
+            data.append({
+                "age": app.age,
+                "gender": app.gender,
+                "marital_status": app.marital_status,
+                "monthly_income": app.monthly_income,
+                "living_expenses": app.living_expenses,
+                "current_debt": app.current_debt,
+                "asset_value": app.asset_value,
+                "dependents": app.dependents,
+                "housing_status": app.housing_status,
+                "loan_amount": app.loan_amount,
+                "purpose": app.purpose,
+                "loan_term_months": app.loan_term_months,
+                "repayment_method": app.repayment_method,
+                "package_id": app.package_id,
+                "is_on_time_payment": app.is_on_time_payment,
+                "is_returning_customer": 1 if len(history) > 0 else 0,
+                "active_loan_count": sum(1 for a in history if a.is_on_time_payment is None and a.status == "approved"),
+                "historical_on_time_rate": prev_on_time / len(prev_completed) if prev_completed else 1.0
+            })
+        return data
 
     @staticmethod
     def get_dashboard_stats(db: Session) -> dict:
